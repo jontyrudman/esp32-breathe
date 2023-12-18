@@ -1,8 +1,8 @@
 #![no_std]
 #![no_main]
 
-mod constants;
 mod config;
+mod constants;
 mod io;
 
 use esp_backtrace as _;
@@ -17,8 +17,8 @@ use io::{
 use core::cell::RefCell;
 use critical_section::Mutex;
 
-type LedPinType = gpio::GpioPin<gpio::Output<gpio::PushPull>, {constants::LED_PIN_NUM}>;
-type PotPinType = gpio::GpioPin<gpio::Analog, {constants::POT_PIN_NUM}>;
+type LedPinType = gpio::GpioPin<gpio::Output<gpio::PushPull>, { constants::LED_PIN_NUM }>;
+type PotPinType = gpio::GpioPin<gpio::Analog, { constants::POT_PIN_NUM }>;
 
 static mut BUTTONS: [Option<button::Buttons>; 10] =
     [None, None, None, None, None, None, None, None, None, None];
@@ -56,12 +56,12 @@ fn main() -> ! {
     // LED setup
     let ledc = ledc::LEDC::new(peripherals.LEDC, &clocks);
     let mut hstimer = ledc.get_timer::<ledc::HighSpeed>(ledc::timer::Number::Timer0);
-    let led = io.pins.gpio22.into_push_pull_output();
-    let mut led_stuff: led::Led<
+    let led_pin = io.pins.gpio22.into_push_pull_output();
+    let mut breathing_led: led::BreathingLed<
         ledc::HighSpeed,
-        gpio::GpioPin<gpio::Output<gpio::PushPull>, {constants::LED_PIN_NUM}>,
-    > = led::Led::new(&ledc);
-    set_up_ledc(led, &mut hstimer, &mut led_stuff);
+        gpio::GpioPin<gpio::Output<gpio::PushPull>, { constants::LED_PIN_NUM }>,
+    > = led::BreathingLed::new(&ledc);
+    set_up_led(led_pin, &mut hstimer, &mut breathing_led);
 
     loop {
         let pot_value: &mut u16 = &mut 0;
@@ -78,13 +78,29 @@ fn main() -> ! {
                 current.setting.as_str(),
                 current.value
             );
+
+            breathing_led.breathe_in_time_ms = conf
+                .as_mut()
+                .unwrap()
+                .get(config::SettingName::InhaleTimeMs)
+                .unwrap_or_else(|| return constants::MIN_INHALE_TIME_MS);
+            breathing_led.breathe_out_time_ms = conf
+                .as_mut()
+                .unwrap()
+                .get(config::SettingName::ExhaleTimeMs)
+                .unwrap_or_else(|| return constants::MIN_EXHALE_TIME_MS);
+            breathing_led.max_duty = conf
+                .as_mut()
+                .unwrap()
+                .get(config::SettingName::BrightnessPct)
+                .unwrap_or_else(|| return 100) as u8;
         });
 
         println!("Breathe in");
-        led_stuff.breathe_in();
+        breathing_led.breathe_in();
 
         println!("Breathe out");
-        led_stuff.breathe_out();
+        breathing_led.breathe_out();
     }
 }
 
@@ -113,18 +129,19 @@ fn set_up_potentiometer(
     pot.read_count = constants::POT_READ_COUNT;
 }
 
-fn set_up_ledc<'a>(
+fn set_up_led<'a>(
     pin: LedPinType,
     hstimer: &'a mut ledc::timer::Timer<ledc::HighSpeed>,
-    led_stuff: &mut led::Led<'a, ledc::HighSpeed, LedPinType>,
+    breathing_led: &mut led::BreathingLed<'a, ledc::HighSpeed, LedPinType>,
 ) {
-    let mut ch = led_stuff
+    let mut ch = breathing_led
+        .led
         .ledc
         .unwrap()
         .get_channel(ledc::channel::Number::Channel0, pin);
     hstimer
         .configure(ledc::timer::config::Config {
-            duty: ledc::timer::config::Duty::Duty5Bit,
+            duty: ledc::timer::config::Duty::Duty10Bit,
             clock_source: ledc::timer::HSClockSource::APBClk,
             frequency: 24u32.kHz(),
         })
@@ -137,11 +154,7 @@ fn set_up_ledc<'a>(
     })
     .unwrap();
 
-    ch.start_duty_fade(0, 100, 2000).expect_err(
-        "Fading from 0% to 100%, at 24kHz and 5-bit resolution, over 2 seconds, should fail",
-    );
-
-    led_stuff.channel = Some(ch);
+    breathing_led.led.channel = Some(ch);
 }
 
 // For a button ISR callback, to increment the current setting
