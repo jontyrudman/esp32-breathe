@@ -46,16 +46,18 @@ pub enum Buttons<'a> {
 pub struct Button<'a, GpioPin> {
     name: &'a str,
     pin: Mutex<RefCell<GpioPin>>,
+    isr_callback: fn(),
 }
 
 impl<'a, GpioPin> Button<'a, GpioPin>
 where
     GpioPin: gpio::Pin,
 {
-    pub fn new(name: &'a str, gpio_pin: GpioPin) -> Self {
+    pub fn new(name: &'a str, gpio_pin: GpioPin, isr_callback: fn()) -> Self {
         let btn = Button {
             name,
             pin: Mutex::new(RefCell::new(gpio_pin)),
+            isr_callback,
         };
 
         critical_section::with(|cs| {
@@ -125,6 +127,7 @@ where
             let mut pin = self.pin.borrow_ref_mut(cs);
             if pin.is_interrupt_set() {
                 println!("Button {} pressed!", self.name);
+                (self.isr_callback)();
                 pin.clear_interrupt();
             }
         });
