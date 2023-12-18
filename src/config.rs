@@ -1,23 +1,11 @@
-const SEGMENT_MIN: u8 = 0;
-const SEGMENT_MAX: u8 = 10;
-
-const MIN_INHALE_TIME_MS: u16 = 3000u16;
-const MAX_INHALE_TIME_MS: u16 = 10000u16;
-
-const MIN_EXHALE_TIME_MS: u16 = 3000u16;
-const MAX_EXHALE_TIME_MS: u16 = 10000u16;
-
-const MIN_HOLD_TIME_MS: u16 = 1000u16;
-const MAX_HOLD_TIME_MS: u16 = 10000u16;
-
-const MIN_AIRLESS_TIME_MS: u16 = 500u16;
-const MAX_AIRLESS_TIME_MS: u16 = 10000u16;
+use crate::constants;
 
 pub struct Config {
     pub items: [ConfigItem; 5],
     current_item_idx: usize,
 }
 
+#[allow(dead_code)]
 impl Config {
     pub fn new() -> Self {
         use SettingName::*;
@@ -25,19 +13,19 @@ impl Config {
             items: [
                 ConfigItem {
                     setting: InhaleTimeMs,
-                    value: MIN_INHALE_TIME_MS,
+                    value: constants::MIN_INHALE_TIME_MS,
                 },
                 ConfigItem {
                     setting: ExhaleTimeMs,
-                    value: MIN_EXHALE_TIME_MS,
+                    value: constants::MIN_EXHALE_TIME_MS,
                 },
                 ConfigItem {
                     setting: HoldTimeMs,
-                    value: MIN_HOLD_TIME_MS,
+                    value: constants::MIN_HOLD_TIME_MS,
                 },
                 ConfigItem {
                     setting: AirlessTimeMs,
-                    value: MIN_AIRLESS_TIME_MS,
+                    value: constants::MIN_AIRLESS_TIME_MS,
                 },
                 ConfigItem {
                     setting: BrightnessPct,
@@ -79,7 +67,6 @@ pub struct ConfigItem {
     pub value: u16,
 }
 
-#[allow(dead_code)]
 #[derive(PartialEq, Copy, Clone)]
 pub enum SettingName {
     InhaleTimeMs,
@@ -122,41 +109,41 @@ impl ConfigItem {
             InhaleTimeMs => {
                 self.value = segment_to_value(
                     segment,
-                    SEGMENT_MIN,
-                    SEGMENT_MAX,
-                    MIN_INHALE_TIME_MS,
-                    MAX_INHALE_TIME_MS,
+                    constants::SEGMENT_MIN,
+                    constants::SEGMENT_MAX,
+                    constants::MIN_INHALE_TIME_MS,
+                    constants::MAX_INHALE_TIME_MS,
                 );
             }
             ExhaleTimeMs => {
                 self.value = segment_to_value(
                     segment,
-                    SEGMENT_MIN,
-                    SEGMENT_MAX,
-                    MIN_EXHALE_TIME_MS,
-                    MAX_EXHALE_TIME_MS,
+                    constants::SEGMENT_MIN,
+                    constants::SEGMENT_MAX,
+                    constants::MIN_EXHALE_TIME_MS,
+                    constants::MAX_EXHALE_TIME_MS,
                 );
             }
             HoldTimeMs => {
                 self.value = segment_to_value(
                     segment,
-                    SEGMENT_MIN,
-                    SEGMENT_MAX,
-                    MIN_HOLD_TIME_MS,
-                    MAX_HOLD_TIME_MS,
+                    constants::SEGMENT_MIN,
+                    constants::SEGMENT_MAX,
+                    constants::MIN_HOLD_TIME_MS,
+                    constants::MAX_HOLD_TIME_MS,
                 );
             }
             AirlessTimeMs => {
                 self.value = segment_to_value(
                     segment,
-                    SEGMENT_MIN,
-                    SEGMENT_MAX,
-                    MIN_AIRLESS_TIME_MS,
-                    MAX_AIRLESS_TIME_MS,
+                    constants::SEGMENT_MIN,
+                    constants::SEGMENT_MAX,
+                    constants::MIN_AIRLESS_TIME_MS,
+                    constants::MAX_AIRLESS_TIME_MS,
                 );
             }
             BrightnessPct => {
-                self.value = segment_to_value(segment, SEGMENT_MIN, SEGMENT_MAX, 0, 100);
+                self.value = segment_to_value(segment, constants::SEGMENT_MIN, constants::SEGMENT_MAX, 0, 100);
             }
         }
     }

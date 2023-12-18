@@ -1,6 +1,7 @@
 #![no_std]
 #![no_main]
 
+mod constants;
 mod config;
 mod io;
 
@@ -16,24 +17,13 @@ use io::{
 use core::cell::RefCell;
 use critical_section::Mutex;
 
-const POT_PIN_NUM: u8 = 34;
-const LED_PIN_NUM: u8 = 22;
-
-type LedPinType = gpio::GpioPin<gpio::Output<gpio::PushPull>, LED_PIN_NUM>;
-// type ButtonPinType = gpio::GpioPin<gpio::Input<gpio::PullDown>, BUTTON_PIN_NUM>;
-type PotPinType = gpio::GpioPin<gpio::Analog, POT_PIN_NUM>;
+type LedPinType = gpio::GpioPin<gpio::Output<gpio::PushPull>, {constants::LED_PIN_NUM}>;
+type PotPinType = gpio::GpioPin<gpio::Analog, {constants::POT_PIN_NUM}>;
 
 static mut BUTTONS: [Option<button::Buttons>; 10] =
     [None, None, None, None, None, None, None, None, None, None];
 
 static CONFIG: Mutex<RefCell<Option<config::Config>>> = Mutex::new(RefCell::new(None));
-
-const POT_READ_COUNT: u16 = 5;
-const POT_MIN: u16 = 430;
-const POT_MAX: u16 = 3410;
-// Artificially hit the max and min segments later by expanding the deadzone
-const POT_DEADZONE: u16 = 200;
-const POT_SEGMENTS: u16 = 10;
 
 #[entry]
 fn main() -> ! {
@@ -69,7 +59,7 @@ fn main() -> ! {
     let led = io.pins.gpio22.into_push_pull_output();
     let mut led_stuff: led::Led<
         ledc::HighSpeed,
-        gpio::GpioPin<gpio::Output<gpio::PushPull>, LED_PIN_NUM>,
+        gpio::GpioPin<gpio::Output<gpio::PushPull>, {constants::LED_PIN_NUM}>,
     > = led::Led::new(&ledc);
     set_up_ledc(led, &mut hstimer, &mut led_stuff);
 
@@ -116,11 +106,11 @@ fn set_up_potentiometer(
             .replace(adc::ADC::<adc::ADC1>::adc(analog.adc1, adc1_config).unwrap())
     });
 
-    pot.min_val = POT_MIN;
-    pot.max_val = POT_MAX;
-    pot.deadzone = POT_DEADZONE;
-    pot.segments = POT_SEGMENTS;
-    pot.read_count = POT_READ_COUNT;
+    pot.min_val = constants::POT_MIN;
+    pot.max_val = constants::POT_MAX;
+    pot.deadzone = constants::POT_DEADZONE;
+    pot.segments = constants::POT_SEGMENTS;
+    pot.read_count = constants::POT_READ_COUNT;
 }
 
 fn set_up_ledc<'a>(
