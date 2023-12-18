@@ -29,7 +29,7 @@ impl Config {
                 },
                 ConfigItem {
                     setting: BrightnessPct,
-                    value: 0,
+                    value: 100,
                 },
             ],
             current_item_idx: 0,
@@ -58,6 +58,15 @@ impl Config {
 
     pub fn current_item(&self) -> ConfigItem {
         self.items[self.current_item_idx]
+    }
+
+    pub fn get(&self, setting: SettingName) -> Option<u16> {
+        for item in self.items {
+            if item.setting == setting {
+                return Some(item.value);
+            }
+        }
+        return None;
     }
 }
 
@@ -143,7 +152,13 @@ impl ConfigItem {
                 );
             }
             BrightnessPct => {
-                self.value = segment_to_value(segment, constants::SEGMENT_MIN, constants::SEGMENT_MAX, 0, 100);
+                self.value = segment_to_value(
+                    segment,
+                    constants::SEGMENT_MIN,
+                    constants::SEGMENT_MAX,
+                    0,
+                    100,
+                );
             }
         }
     }
