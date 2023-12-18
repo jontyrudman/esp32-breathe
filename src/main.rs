@@ -1,101 +1,113 @@
 #![no_std]
 #![no_main]
 
-use core::{borrow::BorrowMut, cell::RefCell};
+mod button;
+mod potentiometer;
+mod led;
 
-use critical_section::Mutex;
 use esp_backtrace as _;
 use esp_println::println;
-use hal::{adc, analog, clock, gpio, interrupt, ledc, peripherals, prelude::*};
+use hal::{adc, analog, clock, gpio, ledc, peripherals, prelude::*};
+use led::Breather;
 
-const BUTTON_PIN_NUM: u8 = 15;
 const POT_PIN_NUM: u8 = 34;
 const LED_PIN_NUM: u8 = 22;
 
 type LedPinType = gpio::GpioPin<gpio::Output<gpio::PushPull>, LED_PIN_NUM>;
-type ButtonPinType = gpio::GpioPin<gpio::Input<gpio::PullDown>, BUTTON_PIN_NUM>;
+// type ButtonPinType = gpio::GpioPin<gpio::Input<gpio::PullDown>, BUTTON_PIN_NUM>;
 type PotPinType = gpio::GpioPin<gpio::Analog, POT_PIN_NUM>;
 
-static BUTTON: Mutex<RefCell<Option<ButtonPinType>>> =
-    Mutex::new(RefCell::new(None));
+static mut BUTTONS: [Option<button::Buttons>; 10] =
+    [None, None, None, None, None, None, None, None, None, None];
 
-static POT_ADCPIN: Mutex<
-    RefCell<Option<adc::AdcPin<PotPinType, adc::ADC1>>>,
-> = Mutex::new(RefCell::new(None));
+const POT_READ_COUNT: u16 = 5;
+const POT_MIN: u16 = 430;
+const POT_MAX: u16 = 3410;
+// Artificially hit the max and min segments later by expanding the deadzone
+const POT_DEADZONE: u16 = 200;
+const POT_SEGMENTS: u16 = 10;
 
-static ADC1: Mutex<RefCell<Option<adc::ADC<'static, adc::ADC1>>>> = Mutex::new(RefCell::new(None));
+#[entry]
+fn main() -> ! {
+    let peripherals = peripherals::Peripherals::take();
+    let system = peripherals.SYSTEM.split();
+    let analog = peripherals.SENS.split();
+    let clocks = clock::ClockControl::boot_defaults(system.clock_control).freeze();
 
-struct Led<'a, S, O>
-where
-    S: ledc::timer::TimerSpeed,
-    O: gpio::OutputPin,
-{
-    pub channel: Option<ledc::channel::Channel<'a, S, O>>,
-    ledc: Option<&'a ledc::LEDC<'a>>,
-}
+    let io = gpio::IO::new(peripherals.GPIO, peripherals.IO_MUX);
 
-impl<'a, S, O> Led<'a, S, O>
-where
-    S: ledc::timer::TimerSpeed,
-    O: gpio::OutputPin,
-{
-    fn new(ledc: &'a ledc::LEDC) -> Self {
-        Led {
-            channel: None,
-            ledc: Some(ledc),
-        }
+    // Set up potentiometer
+    let mut pot: potentiometer::Potentiometer<PotPinType, adc::ADC1> =
+        potentiometer::Potentiometer::new();
+    set_up_potentiometer(analog, io.pins.gpio34.into_analog(), &mut pot);
+
+    // Set up button
+    let btn: button::Buttons<'static> = button::Buttons::B15(button::Button::new(
+        "Mode Selector",
+        io.pins.gpio15.into_pull_down_input(),
+    ));
+    unsafe {
+        BUTTONS[0] = Some(btn);
     }
-}
 
-trait Breather {
-    fn breathe_in(&self);
-    fn breathe_out(&self);
-}
+    // LED setup
+    let ledc = ledc::LEDC::new(peripherals.LEDC, &clocks);
+    let mut hstimer = ledc.get_timer::<ledc::HighSpeed>(ledc::timer::Number::Timer0);
+    let led = io.pins.gpio22.into_push_pull_output();
+    let mut led_stuff: led::Led<
+        ledc::HighSpeed,
+        gpio::GpioPin<gpio::Output<gpio::PushPull>, LED_PIN_NUM>,
+    > = led::Led::new(&ledc);
+    set_up_ledc(led, &mut hstimer, &mut led_stuff);
 
-impl<'a, S, O> Breather for Led<'a, S, O>
-where
-    S: ledc::timer::TimerSpeed,
-    O: gpio::OutputPin,
-    ledc::channel::Channel<'a, S, O>: ledc::channel::ChannelHW<O>,
-{
-    fn breathe_in(&self) {
+    loop {
+        let pot_value: &mut u16 = &mut 0;
+        pot.read(pot_value);
+        println!("Pot ADC reading = {}", pot_value);
+
         println!("Breathe in");
-        self.channel.as_ref().unwrap().start_duty_fade(0, 100, 1000).unwrap();
-        while self.channel.as_ref().unwrap().is_duty_fade_running() {}
-    }
+        led_stuff.breathe_in();
 
-    fn breathe_out(&self) {
         println!("Breathe out");
-        self.channel.as_ref().unwrap().start_duty_fade(100, 0, 1000).unwrap();
-        while self.channel.as_ref().unwrap().is_duty_fade_running() {}
+        led_stuff.breathe_out();
     }
 }
+
 
 fn set_up_potentiometer(
     analog: analog::AvailableAnalog,
-    gpio_pin: gpio::GpioPin<gpio::Analog, 34>,
+    gpio_pin: PotPinType,
+    pot: &mut potentiometer::Potentiometer<PotPinType, adc::ADC1>,
 ) {
     // ADC instances for pot
     let mut adc1_config = adc::AdcConfig::new();
     critical_section::with(|cs| {
-        POT_ADCPIN
+        pot.adc_pin
             .borrow_ref_mut(cs)
             .replace(adc1_config.enable_pin(gpio_pin, adc::Attenuation::Attenuation6dB))
     });
     critical_section::with(|cs| {
-        ADC1.borrow_ref_mut(cs)
+        pot.adc
+            .borrow_ref_mut(cs)
             .replace(adc::ADC::<adc::ADC1>::adc(analog.adc1, adc1_config).unwrap())
     });
+
+    pot.min_val = POT_MIN;
+    pot.max_val = POT_MAX;
+    pot.deadzone = POT_DEADZONE;
+    pot.segments = POT_SEGMENTS;
+    pot.read_count = POT_READ_COUNT;
 }
 
-fn set_up_button(mut gpio_pin: ButtonPinType) {
-    gpio_pin.listen(gpio::Event::FallingEdge);
-    critical_section::with(|cs| BUTTON.borrow_ref_mut(cs).replace(gpio_pin));
-    interrupt::enable(peripherals::Interrupt::GPIO, interrupt::Priority::Priority2).unwrap();
-}
-
-fn set_up_ledc<'a>(pin: LedPinType, hstimer: &'a mut ledc::timer::Timer<ledc::HighSpeed>, led_stuff: &mut Led<'a, ledc::HighSpeed, LedPinType>) {
-    let mut ch = led_stuff.ledc.unwrap().get_channel(ledc::channel::Number::Channel0, pin);
+fn set_up_ledc<'a>(
+    pin: LedPinType,
+    hstimer: &'a mut ledc::timer::Timer<ledc::HighSpeed>,
+    led_stuff: &mut led::Led<'a, ledc::HighSpeed, LedPinType>,
+) {
+    let mut ch = led_stuff
+        .ledc
+        .unwrap()
+        .get_channel(ledc::channel::Number::Channel0, pin);
     hstimer
         .configure(ledc::timer::config::Config {
             duty: ledc::timer::config::Duty::Duty5Bit,
@@ -118,58 +130,16 @@ fn set_up_ledc<'a>(pin: LedPinType, hstimer: &'a mut ledc::timer::Timer<ledc::Hi
     led_stuff.channel = Some(ch);
 }
 
-#[entry]
-fn main() -> ! {
-    let peripherals = peripherals::Peripherals::take();
-    let system = peripherals.SYSTEM.split();
-    let analog = peripherals.SENS.split();
-    let clocks = clock::ClockControl::boot_defaults(system.clock_control).freeze();
-
-    let io = gpio::IO::new(peripherals.GPIO, peripherals.IO_MUX);
-
-    set_up_potentiometer(analog, io.pins.gpio34.into_analog());
-    set_up_button(io.pins.gpio15.into_pull_down_input());
-
-    // LED setup
-    let ledc = ledc::LEDC::new(peripherals.LEDC, &clocks);
-    let mut hstimer = ledc.get_timer::<ledc::HighSpeed>(ledc::timer::Number::Timer0);
-    let led = io.pins.gpio22.into_push_pull_output();
-    let mut led_stuff: Led<
-        ledc::HighSpeed,
-        gpio::GpioPin<gpio::Output<gpio::PushPull>, LED_PIN_NUM>,
-    > = Led::new(&ledc);
-    set_up_ledc(led, &mut hstimer, &mut led_stuff);
-
-    loop {
-        pot_read();
-        led_stuff.breathe_in();
-        led_stuff.breathe_out();
-    }
-}
-
-fn pot_read() {
-    critical_section::with(|cs| {
-        let pot_value: u16 = nb::block!(ADC1
-            .borrow_ref_mut(cs)
-            .borrow_mut()
-            .as_mut()
-            .unwrap()
-            .read(&mut POT_ADCPIN.borrow_ref_mut(cs).borrow_mut().as_mut().unwrap()))
-        .unwrap();
-        println!("Pot ADC reading = {}", pot_value);
-    });
-}
-
+// Turn off interrupt bits set on button press
+// TODO: Extend to handle different button actions
 #[hal::macros::ram]
 #[interrupt]
 unsafe fn GPIO() {
-    println!("Button pressed!");
-    critical_section::with(|cs| {
-        BUTTON
-            .borrow_ref_mut(cs)
-            .borrow_mut()
-            .as_mut()
-            .unwrap()
-            .clear_interrupt();
-    });
+    use button::Interruptor;
+    for btn_opt in &BUTTONS {
+        match btn_opt {
+            Some(btn) => btn.isr(),
+            _ => {}
+        }
+    }
 }
